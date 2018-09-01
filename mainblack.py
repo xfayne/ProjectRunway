@@ -23,6 +23,14 @@ FILEPATH = os.path.abspath(__file__)
 ECGdata = []
 GSRdata = []
 
+ECG_cleard_data = []
+GSR_cleard_data = []
+
+eventsData = []
+eventsTimes = []
+
+blocks = []
+
 data = [GSRdata, ECGdata]
 
 ECGtime = []
@@ -60,7 +68,7 @@ NETWORK = 0 #Use cllasifier or neural network
 filename = 'finalized Gradient Boosting Classifier.sav'
 
 # load the model from disk
-loaded_model = pickle.load(open(filename, 'rb'))
+#loaded_model = pickle.load(open(filename, 'rb'))
 # result = loaded_model.score(X_test, Y_test)
 
 seg_len = 2200
@@ -75,12 +83,6 @@ tags_times = []
 # Run .mat scripts
 #eng = matlab.engine.start_matlab()
 
-def makeBlocksList(tags, tags_time):
-    lst = []
-    for i in range(len(tags)):
-        if (tags[i] == start_block): lst.append([tags_times[i], ])
-        if (tags[i] == end_block): lst[-1].append(tags_times[i])
-    return lst
 
 def clearSignal(signal):
     clearedSignal = []
@@ -128,6 +130,27 @@ def RTStream():
 
 
 
+
+#input: block of GSR snd ECG signals.
+#output: median of all the seg_len size predictions in the block
+def predictBlock(GSRsignal,ECGsignal):
+    i = 0
+    predictions = []
+    while (i+seg_len < len(GSRsignal)):
+        predict = predictSeg([ GSRsignal[i:i+seg_len],ECGsignal[i:i+seg_len] ])
+        predictions.extend(predict)
+        i+= seg_len
+    return int(np.median(predictions))
+
+
+#input: event data list and event samples time.
+#output: list of block time in the session: [(block i Start,block i End)]
+def makeBlocksList(tags, tags_time):
+    lst = []
+    for i in range(len(tags)):
+        if (tags[i] == start_block): lst.append([tags_times[i], ])
+        if (tags[i] == end_block): lst[-1].append(tags_times[i])
+    return lst
 
 
 #input: signal and flag specify the data type.
@@ -208,6 +231,9 @@ def RTupdateSignals(start_time):
 
     #flag end of streaming data
     finish = False
+    
+    #time indexes for start and end of CURRENT block
+    blockStart = blockEnd = 0
 
     while finish == False:
         #''Flag to RTStream() to wait
@@ -225,28 +251,40 @@ def RTupdateSignals(start_time):
         print('data', RTdata)
         print('time', RTtime)
         if counter_seg == seg_len: #Finish reading segment
-
-            segment = [RTdata[0][index-counter_seg+1:index+1],RTdata[1][index-counter_seg+1:index+1]]
+            GSRseg = RTdata[0][index-counter_seg+1:index+1]
+            ECGseg = RTdata[1][index-counter_seg+1:index+1]
+            GSRsegClear = clearSignal(GSRseg)
+            ECGsegClear = clearSignal(ECGseg)
+            #updating the proceesed data arrays for displays later
+            ECG_cleard_data.extend(ECGsegClear)
+            GSR_cleard_data.extend(GSRsegClear)
+            #like it was before, but now with the cleared signal
+            segment = [GSRsegClear,ECGsegClear]
             result = predictSeg(segment)
             blockPredictions.extend(result) #Add predict to list of segmentations' predicts in the block
+            ##### update if only in block? #####
             counter_seg = 0 #Reset counter
 
         if DataStream[2] == end_block: #Finish reading block data. Need to predict the block
+            blockEnd = RTtime
             block_predict = int(np.median(blockPredictions))
             print('Predict is: ', block_predict) #For check
             #Clear predictions
             blockPredictions.clear()
             #Reset counter
             counter_seg = 0
-
-            #Or:
-            #Do something with predict: graph
+            lr = pg.LinearRegionItem(values=[blockStart, blockEnd], brush=pg.intColor(index=block_predict, alpha=50), movable=False)
+            cleardPlot.addItem(lr)
+            label = pg.InfLineLabel(lr.lines[1], "oveload " + str(block_predict), position=0.85, rotateAxis=(1, 0),anchor=(1, 1))
 
         elif DataStream[2] == start_block: #Starting reading new block's data
+            blockStart = RTtime
             reading_block = 1 #Change flag
 
         if  reading_block == 1:
             #Update the counter_seg
+            
+            result
             counter_seg += 1
 
         #Display plot
@@ -257,7 +295,10 @@ def RTupdateSignals(start_time):
             #print(type(RTdata))
             print('shape',RTdata[0].shape)
             ECGcurve.setData( np.asarray(RTdata[0]))
-            #GSRcurve.setData( RTdata[1])
+            ECGcurveClear.setData(ECG_cleard_data)
+            GSRcurveClear.setData(GSR_cleard_data)
+            #GSRcurve.setData( np.asarray(RTdata[1]))
+            
             QtGui.QApplication.processEvents()
 
         if DataStream[2] == end_data:
@@ -279,9 +320,14 @@ class runBlack(QDialog):
         self.setWindowTitle('hello world')
         self.loadGSR.clicked.connect(self.loadGSR_clicked)
         self.loadECG.clicked.connect(self.loadECG_clicked)
-        self.RTinterface.clicked.connect(self.RTinterface_clicked)
         self.start.clicked.connect(self.start_clicked)
         self.reset.clicked.connect(self.reset_clicked)
+        self.loadEvents.clicked.connect(self.loadEvents_clicked)
+        self.RTinterface.clicked.connect(self.RTinterface_clicked)
+        p = self.rawDataView.addPlot()
+        p2 = self.rawDataView.addPlot()
+        ECGcurve = p2.plot(pen=(1, 2))
+        GSRcurve = p.plot(pen=(0, 2))
 
     @pyqtSlot()
 
@@ -293,14 +339,8 @@ class runBlack(QDialog):
             #global ECGdata, data, GSRdata, ECGtime, GSRtime, time, GSRcurve, ECGcurve, p
             global ECGcurve, GSRcurve
             global RTStreamTIME, RTStreamECG, RTStreamGSR, RTStreamEVENTS
-
-
-            p = self.rawDataView.addPlot()
-            ECGcurve = p.plot(pen=(1, 2))
-            GSRcurve = p.plot(pen=(0, 2))
-
-            fgsr = QFileDialog.getOpenFileName(self, 'Open file', "mat files (.mat)")[0]
-            m = sio.loadmat(fgsr)
+            fstream = QFileDialog.getOpenFileName(self, 'Open file', "mat files (.mat)")[0]
+            m = sio.loadmat(fstream)
             RTStreamTIME = m['time_index'][0]
             RTStreamECG = m['gsr'][0]
             RTStreamGSR = m['ecg'][0]
@@ -313,48 +353,44 @@ class runBlack(QDialog):
             # del m
             # data = [GSRdata, ECGdata]
             # time = [GSRtime, ECGtime]
-            p.setXRange(-1.06, 878.15)
-            p.setYRange(4.82, 9.3)
+
 #######################################################
 
-#Or
 #Static mode: load data
+            
+    def loadEvents_clicked(self): 
+        
+        global eventsData, eventsTimes, blocks
+        blocks = []
+        fevents = QFileDialog.getOpenFileName(self, 'Open file', "mat files (.mat)")[0]
+        m = sio.loadmat(fevents)
+        eventsData = m['time_index'][0]
+        eventsTimes = m['data'][0]
+        for i in range(len(eventsData)):
+            if (eventsData[i] == start_block): blocks.append([eventsTimes[i], ])
+            if (eventsData[i] == end_block): blocks[-1].append(eventsTimes[i])
+        del m
+    
     def loadECG_clicked(self):
 
         # self.rawDataView.clear()
         global ECGdata, data, GSRdata, ECGtime, GSRtime, time, ECGcurve, start_time
         fecg = QFileDialog.getOpenFileName(self, 'Open file', "mat files (.mat)")[0]
-        '''m= sio.loadmat(fecg)
-        tmp = m['time_index'][0]
-        ECGtime = []
-        for t in tmp: ECGtime += [t/1000]
+        m= sio.loadmat(fecg)
+        ECGtime = m['time_index'][0]
         ECGdata = m['data'][0]
-        del m'''
+        del m
+        '''
         ECGtime = GSRtime
-        ECGdata = np.random.normal(loc=6.5, scale=0.3, size=len(GSRtime))
+        ECGdata = np.random.normal(loc=6.5, scale=0.3, size=len(GSRtime))'''
         data = [GSRdata, ECGdata]
         time = [GSRtime, ECGtime]
-
-        if self.rtMode.isChecked() == True:
-            # load ECG clicked when the system is on real time mode #
-            '''sync_time = count1 # = GSR current position
-            start_time=Time.time()
-            threading.Timer(0, updateECGplot, (start_time,sync_time,)).start() #start ploting ECG on new thread'''
-
-        else:
-            # load ECG clicked when the system is on static test mode #
-            ECGcurve.setData(ECGtime, ECGdata)
+        ECGcurve.setData(ECGtime, ECGdata)
 
 
     def loadGSR_clicked(self):
 
-        global ECGdata, data, GSRdata, ECGtime, GSRtime, time, GSRcurve, ECGcurve, p
-
-        if GSRdata == []:
-            p = self.rawDataView.addPlot()
-            ECGcurve = p.plot(pen=(1, 2))
-            GSRcurve = p.plot(pen=(0, 2))
-
+        global ECGdata, data, GSRdata, ECGtime, GSRtime, time, GSRcurve, ECGcurve, p, p2
         fgsr = QFileDialog.getOpenFileName(self, 'Open file', "mat files (.mat)")[0]
         m = sio.loadmat(fgsr)
         GSRtime = m['time_index'][0]
@@ -364,15 +400,7 @@ class runBlack(QDialog):
         time = [GSRtime, ECGtime]
         p.setXRange(-1.06, 878.15)
         p.setYRange(4.82, 9.3)
-
-        if self.rtMode.isChecked() == True:
-            # load ECG clicked when the system is on real time mode #
-            '''starttime=Time.time()
-            threading.Timer(0, updateGSRplot, (starttime,)).start() #start ploting GSR on new thread'''
-
-        else:
-            # load GSR clicked when the system is on static test mode #
-            GSRcurve.setData(GSRtime, GSRdata)
+        GSRcurve.setData(GSRtime, GSRdata)
 #######################################################
 
 
@@ -401,26 +429,27 @@ class runBlack(QDialog):
                 thread_stream.join()
                 thread_predict.join()
 
-        #Or
+        
         else:
             # system is on static test mode #
-            data = [GSRdata, ECGdata]
-            p1 = self.modDataView.addPlot(x=time[1], y=data[1], pen=(1, 2))
-            p2 = pg.PlotCurveItem(x=time[0], y=data[0], pen=(0, 2))
-            p1.addItem(p2)
-
-            # for i in range(len(blocks)):
-            #     # add the network workeloads predictons of each data block to the graphic view
-            #     level = predictBlock(GSRdata[blocks[i][0]:blocks[i][1]], ECGdata[blocks[i][0]:blocks[i][1]])
-            #     lr = pg.LinearRegionItem(values=[150 * (i), 150 * (i + 1)], brush=pg.intColor(index=level, alpha=50),
-            #                              movable=False)
-            #     p1.addItem(lr)
-            #     label = pg.InfLineLabel(lr.lines[1], "oveload " + str(level), position=0.85, rotateAxis=(1, 0),
-            #                             anchor=(1, 1))
-            #
-            # else:
-            #     # either GSR or ECG files has not been loaded
-            #     print('error')
+            if ((ECGdata!= []) and (GSRdata!= [])):
+            # both GSR & ECG files has been loaded
+                data = [GSRdata, ECGdata]
+                p1 = self.modDataView.addPlot(x=time[1], y=data[1], pen=(1, 2))
+                p2 = pg.PlotCurveItem(x=time[0], y=data[0], pen=(0, 2))
+                p1.addItem(p2)
+                for i in range(len(blocks)):
+                #     # add the network workeloads predictons of each data block to the graphic view
+                    blockStart = blocks[i][0]
+                    blockEnd = blocks[i][1]
+                    level = predictBlock(GSRdata[blocks[i][0]:blocks[i][1]], ECGdata[blocks[i][0]:blocks[i][1]])
+                    lr = pg.LinearRegionItem(values=[blockStart, blockEnd], brush=pg.intColor(index=level, alpha=50), movable=False)
+                    p1.addItem(lr)
+                    label = pg.InfLineLabel(lr.lines[1], "oveload " + str(level), position=0.85, rotateAxis=(1, 0),anchor=(1, 1))
+    
+            else:
+                # either GSR or ECG files has not been loaded
+                 print('error')
 
 
     def reset_clicked(self):
