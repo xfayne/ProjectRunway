@@ -414,7 +414,7 @@ class runBlack(QDialog):
     #START
     def start_clicked(self):
 
-        global data, ECGdata, GSRdata, ECGcurveClear,  GSRcurveClear
+        global data, ECGdata, GSRdata, ECGcurveClear,  GSRcurveClear, cleardPlot 
 
         #RT variables for simulating streaming
         global RTStreamTIME, RTStreamECG, RTStreamGSR, RTStreamEVENTS, ECGcurveClear, GSRcurveClear
