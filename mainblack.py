@@ -208,12 +208,12 @@ def predictSeg(inputs):
 
 #Update in RT the signals plots and calling the predictSeg when needed
 #Calculate the final predict of the block
-def RTupdateSignals(start_time):
+def RTupdateSignals(start_time, self):
     # getting paramater 'start_time' = time of the clock when this method had been called
     # every 0.2 sec the plot is being updating with more 200 data value
     #global GSRdata, GSRtime, GSRcurve, count1, RTdataGSR, RTtimeGSR
 
-    global DataStream, index
+    global DataStream, index, ECGcurve, ECGcurveClear, GSRcurve, GSRcurveClear
     # ''condition.notify()  # signal that a new item is available
     # ''condition.release()
     RTtime = np.array([])
@@ -261,8 +261,13 @@ def RTupdateSignals(start_time):
             #like it was before, but now with the cleared signal
             segment = [GSRsegClear,ECGsegClear]
             result = predictSeg(segment)
-            blockPredictions.extend(result) #Add predict to list of segmentations' predicts in the block
-            ##### update if only in block? #####
+            '''blockPredictions.extend(result) #Add predict to list of segmentations' predicts in the block
+            ##### update if only in block? #####'''
+            if (reading_block == 1): blockPredictions.extend(result)
+            #only if the segment is in block segment update the block predictions list
+            self.lcdNumber.display(result)
+            self.progressBar.setValue(result)
+            #graphic display of thr segments prediction
             counter_seg = 0 #Reset counter
 
         if DataStream[2] == end_block: #Finish reading block data. Need to predict the block
@@ -276,6 +281,7 @@ def RTupdateSignals(start_time):
             lr = pg.LinearRegionItem(values=[blockStart, blockEnd], brush=pg.intColor(index=block_predict, alpha=50), movable=False)
             cleardPlot.addItem(lr)
             label = pg.InfLineLabel(lr.lines[1], "oveload " + str(block_predict), position=0.85, rotateAxis=(1, 0),anchor=(1, 1))
+            #graphic display of the block prediction
 
         elif DataStream[2] == start_block: #Starting reading new block's data
             blockStart = RTtime
@@ -329,6 +335,7 @@ class runBlack(QDialog):
         ECGcurve = p2.plot(pen=(1, 2))
         GSRcurve = p.plot(pen=(0, 2))
 
+
     @pyqtSlot()
 
 
@@ -364,8 +371,8 @@ class runBlack(QDialog):
         blocks = []
         fevents = QFileDialog.getOpenFileName(self, 'Open file', "mat files (.mat)")[0]
         m = sio.loadmat(fevents)
-        eventsData = m['time_index'][0]
-        eventsTimes = m['data'][0]
+        eventsTimes = m['time_index'][0]
+        eventsData = m['data'][0]
         for i in range(len(eventsData)):
             if (eventsData[i] == start_block): blocks.append([eventsTimes[i], ])
             if (eventsData[i] == end_block): blocks[-1].append(eventsTimes[i])
@@ -407,13 +414,17 @@ class runBlack(QDialog):
     #START
     def start_clicked(self):
 
-        global data, ECGdata, GSRdata
+        global data, ECGdata, GSRdata, ECGcurveClear,  GSRcurveClear
 
         #RT variables for simulating streaming
-        global RTStreamTIME, RTStreamECG, RTStreamGSR, RTStreamEVENTS
+        global RTStreamTIME, RTStreamECG, RTStreamGSR, RTStreamEVENTS, ECGcurveClear, GSRcurveClear
 
         # Real Time mode
         if self.rtMode.isChecked() == True:
+                # preapre procceced data curves
+                cleardPlot = self.modDataView.addPlot()
+                ECGcurveClear = cleardPlot.plot(pen=(1, 2))
+                GSRcurveClear = cleardPlot.plot(pen=(0, 2))
             # The data that will be used to simulate streaming is loaded
             #if ((RTStreamTIME != []) and (RTStreamECG != []) and (RTStreamGSR != []) and (RTStreamEVENTS != [])):
 
@@ -423,7 +434,7 @@ class runBlack(QDialog):
 
                 # Thread for update signals and calculations
                 start_time = Time.time()
-                thread_predict = threading.Timer(0, RTupdateSignals, (start_time,)).start()
+                thread_predict = threading.Timer(0, RTupdateSignals, (start_time,self,)).start()
 
                 #Waiting for processes to finish
                 thread_stream.join()
